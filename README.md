@@ -38,4 +38,27 @@ docker run -p 8000:8000 --env-file .env codefixer
 Fixed code is executed to run the tests. Only run this on your own machine or in a sandbox; do not expose it publicly without isolating execution.
 
 ## Results
-Add your benchmark here, e.g. "fixed 13 of 15 broken files".
+
+
+10 deliberately broken Python files. The agent fixes each, then an **independent**
+test suite (not written by the agent) checks whether the fix is really correct.
+
+| file | agent says | really correct |
+|------|-----------|----------------|
+| add_item | fixed | YES |
+| binary_search | fixed | YES |
+| count_words | fixed | YES |
+| fizzbuzz | fixed | YES |
+| flatten | fixed | YES |
+| is_valid_password | fixed | **NO** |
+| median | fixed | YES |
+| second_largest | fixed | YES |
+| total_script | failed | YES |
+| word_frequency | fixed | YES |
+
+**8–9 of 10 really correct across 4 runs.**
+
+The agent's own tests sometimes pass when the code is still wrong
+(`is_valid_password`: both reference implementations produced only all-False
+tests, so valid passwords were never checked). This is the limit of
+self-testing — which is why the benchmark uses independent tests.
