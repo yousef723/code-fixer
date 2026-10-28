@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeFixer</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 1000px; margin: 24px auto; padding: 0 16px; background: #0f1115; color: #e6e6e6; }
+  h1 { margin-bottom: 4px; } .sub { color: #9aa0a6; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  label { font-weight: 600; font-size: 14px; }
+  textarea { width: 100%; height: 220px; background: #181b21; color: #e6e6e6; border: 1px solid #2c313a; border-radius: 8px; padding: 10px; font-family: ui-monospace, monospace; font-size: 13px; box-sizing: border-box; }
+  button { margin: 14px 0; padding: 10px 22px; background: #4f8cff; color: white; border: 0; border-radius: 8px; font-size: 15px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  .card { background: #181b21; border: 1px solid #2c313a; border-radius: 8px; padding: 14px; margin-top: 14px; }
+  pre { background: #0f1115; padding: 10px; border-radius: 6px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; }
+  .fixed, .already_passing { color: #4ade80; } .failed { color: #f87171; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; } td, th { text-align: left; padding: 6px; border-bottom: 1px solid #2c313a; }
+  .stats { color: #9aa0a6; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>CodeFixer</h1>
+<div class="sub">Paste broken code and its tests. The agent fixes the code, re-runs the tests, and repeats until they pass.</div>
+<div class="stats" id="stats"></div>
+
+<div class="grid">
+  <div><label>Broken code (saved as solution.py)</label>
+<textarea id="code">def add(a, b):
+    return a - b</textarea></div>
+  <div><label>Tests <button id="gen" type="button" style="margin:0 0 0 8px;padding:4px 12px;font-size:13px">Write tests</button></label>
+<textarea id="test" placeholder="Click Write tests and the AI fills this box. Edit if needed, then click Fix it."></textarea></div>
+</div>
+<button id="go">Fix it</button>
+<div id="result"></div>
+
+<h3>History</h3>
+<div class="card"><table><thead><tr><th>#</th><th>Time</th><th>Status</th><th>Fix attempts</th><th></th></tr></thead><tbody id="history"></tbody></table></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+function render(run) {
+  const log = (run.log || []).map(l =>
+    `<div><b>Run ${l.attempt}:</b> ${l.passed ? '✅ tests passed' : '❌ tests failed'}<pre>${esc(l.output)}</pre></div>`).join('');
+  $('result').innerHTML = `<div class="card">
+    <h3>Status: <span class="${run.status}">${run.status.replace('_', ' ')}</span> (${run.attempts} fix attempts)</h3>
+    <b>Final code</b><pre>${esc(run.final_code)}</pre>
+    <details><summary>Tests used${run.generated_tests ? ' (written by the AI)' : ''}</summary><pre>${esc(run.test_code || '')}</pre></details>
+    <details><summary>Agent log</summary>${log}</details></div>`;
+}
+
+async function loadHistory() {
+  const rows = await (await fetch('/api/runs')).json();
+  $('history').innerHTML = rows.map(r => `<tr><td>${r.id}</td><td>${r.created_at}</td>
+    <td class="${r.status}">${r.status}</td><td>${r.attempts}</td>
+    <td><a href="#" data-id="${r.id}">view</a></td></tr>`).join('');
+  const s = await (await fetch('/api/stats')).json();
+  $('stats').textContent = s.total_runs
+    ? `${s.total_runs} runs | fixed ${s.fixed} | failed ${s.failed}` + (s.fix_rate !== null ? ` | fix rate ${s.fix_rate}%` : '')
+    : 'No runs yet';
+}
+
+$('history').addEventListener('click', async e => {
+  const id = e.target.dataset.id; if (!id) return; e.preventDefault();
+  render(await (await fetch('/api/runs/' + id)).json());
+});
+
+$('go').addEventListener('click', async () => {
+  $('go').disabled = true; $('go').textContent = 'Working...';
+  try {
+    const res = await fetch('/api/fix', { method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ code: $('code').value, test: $('test').value }) });
+    const data = await res.json();
+    if (!res.ok) { $('result').innerHTML = `<div class="card failed">${esc(data.detail || 'Error')}</div>`; }
+    else { render(data); loadHistory(); }
+  } catch (err) { $('result').innerHTML = `<div class="card failed">${esc(String(err))}</div>`; }
+  $('go').disabled = false; $('go').textContent = 'Fix it';
+});
+$('gen').addEventListener('click', async () => {
+  $('gen').disabled = true; $('gen').textContent = 'Writing...';
+  try {
+    const res = await fetch('/api/generate-tests', { method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ code: $('code').value }) });
+    const data = await res.json();
+    if (!res.ok) { $('result').innerHTML = `<div class="card failed">${esc(data.detail || 'Error')}</div>`; }
+    else { $('test').value = data.test; }
+  } catch (err) { $('result').innerHTML = `<div class="card failed">${esc(String(err))}</div>`; }
+  $('gen').disabled = false; $('gen').textContent = 'Write tests';
+});
+loadHistory();
+</script>
+</body>
+</html>
